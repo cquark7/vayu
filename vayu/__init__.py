@@ -1,1 +1,1 @@
-# from .core import Downloader
+from .core import Downloader

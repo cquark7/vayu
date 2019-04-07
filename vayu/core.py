@@ -1,11 +1,15 @@
-import datetime
+# TODO: Create a separate class named `Manager` for managing downloads
+# TODO: Remove f-strings to support earlier versions of python
+
+import os
 import platform
 import subprocess
 import sys
 import time
-import threading
 import warnings
 from pathlib import Path
+
+import gevent.monkey; gevent.monkey.patch_all()
 import requests
 
 from vayu import utils
@@ -17,7 +21,8 @@ class Downloader:
     """
 
     def __init__(self, url, dest=None, auto_start=True, play=False, progress=True):
-        self.url = url
+
+        self.url = url.strip()
         self.dest = dest
         self.auto_start = auto_start
         self.play = play
@@ -26,55 +31,103 @@ class Downloader:
         self.session = requests.Session()
         self.session.headers.update(utils.headers)
 
+        # Initialize response
         resp = self.check_connection(self.url)
-        self.filename = utils.get_filename(resp)
-        self.filesize = utils.get_filesize(resp)
-        self.category = utils.get_category(self.filename)
-        self.save_as = self.get_save_path(self.dest)
 
+        # File name extracted from initial HTTP response
+        self.filename = Path(utils.get_filename(resp))
+
+        # File size extracted from initial HTTP response
+        self.filesize = utils.get_filesize(resp)
+
+        # This stores the extension of file (.mp4, .mp3, etc)
+        self.filetype = self.filename.suffix
+
+        # Helps in selecting default download directory
+        self.category = utils.get_category(self.filetype)
+
+        # Absolute path of file
+        self.save_as = self.resolve_path(self.dest)
+
+        # Stores total number of bytes written to file
         self.downloaded = 0
-        self.status = None
+
+        self.status = 'initialized'
+
         print(self.__repr__())
 
-        self.start()
+        self.download_handler()
 
     def start(self):
-        self.threaded_tasks()
         self.status = 'running'
+        self.threaded_tasks()
         self.download()
         self.status = 'finished'
 
-    def stop(self, exp_type):
+    def stop(self, exp_type=None):
         if self.downloaded == self.filesize:
             self.status = 'finished'
-        if isinstance(exp_type, (KeyboardInterrupt, SystemExit)):
+            print('Download Complete!')
+        elif isinstance(exp_type, (KeyboardInterrupt, SystemExit)):
             self.status = 'killed'
+        else:
+            self.status = 'stopped'
         self.session.close()
 
     def resume(self):
-        pass
+        beg = self.get_size(self.save_as)
+        end = self.filesize
+        self.downloaded = beg
+
+        self.threaded_tasks()
+        self.status = 'running'
+        self.download(beg, end)
+        self.status = 'finished'
 
     def download_handler(self):
-        # TODO complete this function
-        def prompt1():
-            warnings.warn('Same file already exists!')
-            print('  Select an option:')
-            options = ['overwrite: 1', 'rename: 2', 'cancel: 3']
-
-        def prompt2():
-            warnings.warn('File name collision!')
-            print('  Select an option:')
-            options = ['resume: 1', 'rename: 2', 'cancel: 3']
+        # TODO: Compare files by computing hash.
+        # TODO: Cache url and other info for future use.
 
         loc = Path(self.save_as)
         if loc.exists():
-            if loc.stat().st_size == self.filesize:
-                pass
+            # If size of both files are same (in bytes)
+            # then it's most likely a duplicate file
+            if self.get_size(loc) == self.filesize:
+                warnings.warn(f'Identical file exists on dir: {self.save_as}')
+                choice = utils.user_prompt1()
+                # choice 1: download with new filename
+                if choice == '1':
+                    self.save_as = utils.gen_new_filename(self.save_as)
+                    self.start()
+
+                # choice 2: overwrite file
+                elif choice == '2':
+                    self.start()
+
+                # choice 3: cancel download
+                else:
+                    self.stop()
+
             else:
-                pass
-        else:
-            if self.auto_start:
-                self.start()
+                warnings.warn(f"Filename collision: {self.save_as}")
+                choice = utils.user_prompt2()
+
+                # choice 1: download with new filename
+                if choice == '1':
+                    self.save_as = utils.gen_new_filename(self.save_as)
+                    print(f'New path: {self.save_as}')
+                    self.start()
+
+                # choice 2: resume file download
+                elif choice == '2':
+                    self.resume()
+
+                # choice 3: cancel download
+                else:
+                    self.stop()
+
+        elif self.auto_start:
+            self.start()
 
     def download(self, beg=None, end=None):
         header = utils.headers.copy()
@@ -85,7 +138,6 @@ class Downloader:
             mode = 'wb'
 
         r = self.session.get(self.url, headers=header, stream=True)
-
         chunk_size = 1000  # 1000 = 1 kB
         with open(self.save_as, mode=mode) as outfile:
             for chunk in r.iter_content(chunk_size=chunk_size):
@@ -93,47 +145,55 @@ class Downloader:
                     outfile.write(chunk)
                     self.downloaded += len(chunk)
 
-    def _progress(self):
+    def progress_bar(self):
         """
-        Updates download progress after every one second.
+        Updates download progress and transfer rate.
+        This piece of code runs after every one second.
         """
+        seconds_passed = 0
         next_call = time.perf_counter()
         while True:
             next_call += 1
-            current = self.downloaded
-            time.sleep(next_call - time.perf_counter())
-            if self.status in {'killed', 'finished'}:
+            temp = self.downloaded
+            gevent.sleep(next_call - time.perf_counter())
+            seconds_passed += 1
+            avg_speed = self.downloaded / seconds_passed
+            ins_speed = (self.downloaded - temp) // 1000
+            if self.status in {'killed', 'finished', 'stopped'}:
                 break
-            if self.filesize:
+            if self.filesize and avg_speed:
+                eta = round(self.filesize / avg_speed, 2)
                 progress = round(self.downloaded / self.filesize * 100, 2)
             else:
-                progress = '?'
-            d = datetime.datetime.now().strftime('%S.%f')[:-4]
-            message = f'\rProgress --> {progress} % | {d} | ' \
-                f'Speed --> {(self.downloaded - current) // 1000} kB/s '
-            print(message, end='')
+                eta = progress = '?'
 
-        if self.status == 'finished':
-            print('\rDownload Complete!')
+            message = f"\rProgress: {progress} % || "\
+                      f"Time Left: {eta} || "\
+                      f"Speed: {ins_speed} kB/s"
+            print(message, end='')
 
     def play_media(self, min_bytes=10**7):
         """
         Open a media file with the default application.
         It checks if enough data is available to play the file
         after every five seconds.
+        Note: Some video formats cannot be
         """
+        min_bytes = max(min_bytes, self.filesize//100)
         next_call = time.perf_counter()
         while True:
             next_call += 5
-            time.sleep(next_call - time.perf_counter())
+            gevent.sleep(next_call - time.perf_counter())
+            if self.status in {'killed', 'finished', 'stopped'}:
+                break
             if self.downloaded > min_bytes:
                 op_sys = platform.system()
                 if op_sys == 'Darwin':  # For macOS
                     command = 'open'
-                elif op_sys == 'Windows':
-                    command = 'start'
                 elif op_sys == 'Linux':
                     command = 'xdg-open'
+                elif op_sys == 'Windows':
+                    return os.startfile(self.save_as)
                 else:
                     return None
 
@@ -143,41 +203,60 @@ class Downloader:
 
     def threaded_tasks(self):
         """
-        Tasks that need to run concurrently during file download
+        Tasks that need to run concurrently during file download.
+        Thread 1: Updates download progress and transfer rate.
+        Thread 2: Plays media content in default app.
         """
         if self.progress:
-            t1 = threading.Thread(target=self._progress)
-            t1.daemon = True
-            t1.start()
+            gevent.spawn(self.progress_bar)
             
-        if self.play and self.category == 'Video':
-            t2 = threading.Thread(target=self.play_media)
-            t2.daemon = True
-            t2.start()
+        if self.play:
+            if self.category == 'Video':
+                gevent.spawn(self.play_media)
+            else:
+                warnings.warn('File cannot be streamed.')
+
+    def resolve_path(self, dest):
+        default_dir = Path('~/Downloads').expanduser()
+        if isinstance(dest, str):
+            dest = Path(dest)
+            if dest.is_dir():
+                directory = dest
+            else:
+                message = "Destination directory doesn't exist. Using default directory."
+                warnings.warn(message)
+                directory = default_dir / self.category
+        else:
+            directory = default_dir / self.category
+
+        Path(directory).mkdir(parents=True, exist_ok=True)
+        return directory / self.filename
 
     def check_connection(self, url):
         try:
             resp = self.session.get(url, stream=True, allow_redirects=True)
         except requests.RequestException as exp:
+            self.session.close()
             print(exp)
+            print(f'Error with URL: {self.url}')
             sys.exit()
         return resp
 
-    def get_save_path(self, dest):
-        if dest and Path(dest).is_dir():
-            self.dest = Path(dest)
-        else:
-            self.dest = Path.expanduser(Path('~/Downloads')) / self.category
-
-        Path(self.dest).mkdir(parents=True, exist_ok=True)
-        file_path = self.dest / self.filename
-        return file_path
+    @staticmethod
+    def get_size(dest):
+        """
+        Returns the size of file in bytes
+        :param dest: Absolute path of existing file/folder
+        :return: int
+        """
+        return Path(dest).stat().st_size
 
     def __repr__(self):
         info = [
             f'URL: {self.url}',
             f'File Size: {utils.readable_size(self.filesize)}',
             f'File Name: {self.filename}',
+            f'File Type: {self.filetype}',
             f'Category: {self.category}',
             f'Path: {self.save_as}',
         ]
@@ -187,9 +266,7 @@ class Downloader:
         self.stop(exc_type)
 
 
-#
-# # from vayu import Downloader as dl
-#
-# url = input('Enter URL: ').strip()
-# Downloader(url)
-print('hey')
+# if __name__ == '__main__':
+#     url = input('Enter a URL: ').strip()
+#     dl = Downloader(url, auto_start=False)
+#     dl.start()

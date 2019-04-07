@@ -1,8 +1,9 @@
 import cgi
-import lxml.html
 import re
 from pathlib import Path
 from urllib import parse
+
+import lxml.html
 
 headers = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:56.0) Gecko/20100101 Firefox/56.0',
@@ -52,22 +53,27 @@ def get_filename(resp):
     idx = fn.rfind('.')
     if not fn or ('html' in content_type and idx == -1):
         title = lxml.html.fromstring(resp.content).find(".//title")
-        fn = title.text + '.html'
+        fn = title.text + '.htm'
 
     return _get_valid_filename(fn)
 
 
 def get_filesize(resp):
+    """
+    Returns file size in bytes
+    :param resp: requests.Response
+    :return: int or NoneType
+    """
     fs = resp.headers.get('content-length', None)
     return int(fs) if fs else fs
 
 
-def get_category(filename):
+def get_category(filetype):
     """
     Returns the category of file using its file extension
-    Categories: Video, Music, Compresses, etc
+    Categories: Video, Music, Compressed, etc
     """
-    ext = Path(filename).suffix.lstrip('.')
+    ext = filetype.lstrip('.')
     for category in containers:
         if ext in containers[category]:
             return category
@@ -103,3 +109,59 @@ def readable_size(size):
         i += 1
         size /= 1024
     return f'{round(size, 2)} {suffix[i]}'
+
+
+def gen_new_filename(loc):
+    """
+    Generates new filename when there is filename collision.
+    :param loc: absolute path of file
+    :return: pathlib.Path object
+    """
+    loc = Path(loc)
+    directory = loc.parent
+    fn = loc.stem
+    ext = loc.suffix
+    x = 1
+    while True:
+        if loc.exists() is False:
+            break
+        new_fn = f'{fn}_{x}'
+        loc = directory / (new_fn + ext)
+        x += 1
+    return loc
+
+
+def user_prompt1():
+    while True:
+        print('*' * 40)
+        print('>> Select an option:')
+        print(f'\t[1] rename --> Add duplicate file with a numbered filename.')
+        print(f'\t[2] overwrite --> overwrite the existing file.')
+        print(f'\t[3] cancel --> cancel the download.')
+        print('*' * 40)
+        c = input('Your choice: ').strip()
+        if c == '1' or c == 'rename':
+            return '1'
+        if c == '2' or c == 'overwrite':
+            return '2'
+        if c == '3' or c == 'cancel':
+            return '3'
+        print('Invalid choice. Enter `1` or `2` or `3`.')
+
+
+def user_prompt2():
+    while True:
+        print('*' * 40)
+        print('>> Select an option:')
+        print(f'\t[1] rename --> Add duplicate file with a numbered filename.')
+        print(f'\t[2] resume --> resume file download.')
+        print(f'\t[3] cancel --> cancel the download.')
+        print('*' * 40)
+        c = input('Your choice: ').strip()
+        if c == '1' or c == 'rename':
+            return '1'
+        if c == '2' or c == 'resume':
+            return '2'
+        if c == '3' or c == 'cancel':
+            return '3'
+        print('Invalid choice. Enter `1` or `2` or `3`.')
