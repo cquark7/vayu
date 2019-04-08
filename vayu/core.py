@@ -1,15 +1,13 @@
-# TODO: Create a separate class named `Manager` for managing downloads
-# TODO: Remove f-strings to support earlier versions of python
-
 import os
 import platform
 import subprocess
-import sys
 import time
 import warnings
 from pathlib import Path
 
-import gevent.monkey; gevent.monkey.patch_all()
+import gevent.monkey;
+
+gevent.monkey.patch_all()
 import requests
 
 from vayu import utils
@@ -20,7 +18,7 @@ class Downloader:
     Write something useful here
     """
 
-    def __init__(self, url, dest=None, auto_start=True, play=False, progress=True):
+    def __init__(self, url, dest=None, auto_start=False, play=False, progress=True):
 
         self.url = url.strip()
         self.dest = dest
@@ -54,8 +52,6 @@ class Downloader:
 
         self.status = 'initialized'
 
-        print(self.__repr__())
-
         self.download_handler()
 
     def start(self):
@@ -75,7 +71,7 @@ class Downloader:
         self.session.close()
 
     def resume(self):
-        beg = self.get_size(self.save_as)
+        beg = os.path.getsize(self.save_as)
         end = self.filesize
         self.downloaded = beg
 
@@ -92,8 +88,8 @@ class Downloader:
         if loc.exists():
             # If size of both files are same (in bytes)
             # then it's most likely a duplicate file
-            if self.get_size(loc) == self.filesize:
-                warnings.warn(f'Identical file exists on dir: {self.save_as}')
+            if os.path.getsize(loc) == self.filesize:
+                warnings.warn('Identical file exists on dir {}'.format(self.save_as))
                 choice = utils.user_prompt1()
                 # choice 1: download with new filename
                 if choice == '1':
@@ -109,13 +105,13 @@ class Downloader:
                     self.stop()
 
             else:
-                warnings.warn(f"Filename collision: {self.save_as}")
+                warnings.warn('Filename collision: {}'.format(self.save_as))
                 choice = utils.user_prompt2()
 
                 # choice 1: download with new filename
                 if choice == '1':
                     self.save_as = utils.gen_new_filename(self.save_as)
-                    print(f'New path: {self.save_as}')
+                    print('New save path: {}'.format(self.save_as))
                     self.start()
 
                 # choice 2: resume file download
@@ -132,7 +128,7 @@ class Downloader:
     def download(self, beg=None, end=None):
         header = utils.headers.copy()
         if beg:
-            header['Range'] = f'bytes={beg}-{end}'
+            header['Range'] = 'bytes={}-{}'.format(beg, end)
             mode = 'ab'
         else:
             mode = 'wb'
@@ -167,19 +163,18 @@ class Downloader:
             else:
                 eta = progress = '?'
 
-            message = f"\rProgress: {progress} % || "\
-                      f"Time Left: {eta} || "\
-                      f"Speed: {ins_speed} kB/s"
+            message = "\rProgress: {} % || Time Left: {} || Speed: {} kB/s" \
+                .format(progress, eta, ins_speed)
             print(message, end='')
 
-    def play_media(self, min_bytes=10**7):
+    def play_media(self, min_bytes=10 ** 7):
         """
         Open a media file with the default application.
         It checks if enough data is available to play the file
         after every five seconds.
         Note: Some video formats cannot be
         """
-        min_bytes = max(min_bytes, self.filesize//100)
+        min_bytes = max(min_bytes, self.filesize // 100)
         next_call = time.perf_counter()
         while True:
             next_call += 5
@@ -209,7 +204,7 @@ class Downloader:
         """
         if self.progress:
             gevent.spawn(self.progress_bar)
-            
+
         if self.play:
             if self.category == 'Video':
                 gevent.spawn(self.play_media)
@@ -234,31 +229,22 @@ class Downloader:
 
     def check_connection(self, url):
         try:
-            resp = self.session.get(url, stream=True, allow_redirects=True)
-        except requests.RequestException as exp:
-            self.session.close()
-            print(exp)
-            print(f'Error with URL: {self.url}')
-            sys.exit()
+            resp = self.session.get(url, stream=True)
+        except requests.RequestException:
+            raise ConnectionError('Error with URL: {}'.format(self.url))
+        if not resp.ok:
+            raise ConnectionError("Server status is {}.".format(resp.status_code),
+                                  "\nCheck: https://httpstatuses.com/")
         return resp
-
-    @staticmethod
-    def get_size(dest):
-        """
-        Returns the size of file in bytes
-        :param dest: Absolute path of existing file/folder
-        :return: int
-        """
-        return Path(dest).stat().st_size
 
     def __repr__(self):
         info = [
-            f'URL: {self.url}',
-            f'File Size: {utils.readable_size(self.filesize)}',
-            f'File Name: {self.filename}',
-            f'File Type: {self.filetype}',
-            f'Category: {self.category}',
-            f'Path: {self.save_as}',
+            'URL: {}'.format(self.url),
+            'File Name: {}'.format(self.filename),
+            'File Size: {}'.format(utils.readable_size(self.filesize)),
+            'File Type: {}'.format(self.filetype),
+            'Category: {}'.format(self.category),
+            'Path: {}'.format(self.save_as),
         ]
         return '\n'.join(info)
 
@@ -266,7 +252,9 @@ class Downloader:
         self.stop(exc_type)
 
 
-# if __name__ == '__main__':
-#     url = input('Enter a URL: ').strip()
-#     dl = Downloader(url, auto_start=False)
-#     dl.start()
+if __name__ == '__main__':
+    url = "https://fr9.seedr.cc/ff_get/374372932/x64.exe?st=wCAHAm4NPL6DUPe_MhbM2w&e=1554834046"
+    dl = Downloader(url)
+    print(dl.filename)
+    dl.start()
+

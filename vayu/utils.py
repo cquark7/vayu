@@ -3,8 +3,6 @@ import re
 from pathlib import Path
 from urllib import parse
 
-import lxml.html
-
 headers = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:56.0) Gecko/20100101 Firefox/56.0',
 }
@@ -51,9 +49,13 @@ def get_filename(resp):
     fn = parse.unquote(fn)
     content_type = resp.headers.get('Content-Type')
     idx = fn.rfind('.')
-    if not fn or ('html' in content_type and idx == -1):
-        title = lxml.html.fromstring(resp.content).find(".//title")
-        fn = title.text + '.htm'
+    if fn and ('html' in content_type and idx == -1):
+        fn += '.htm'
+    # if filename is still not found extract it from page title
+    if not fn:
+        match = re.search('<title>(.*?)</title>', resp.content)
+        title = match.group(1) if match else 'default'
+        fn = title
 
     return _get_valid_filename(fn)
 
@@ -108,7 +110,7 @@ def readable_size(size):
     while size >= 1024:
         i += 1
         size /= 1024
-    return f'{round(size, 2)} {suffix[i]}'
+    return '{} {}'.format(round(size, 2), suffix[i])
 
 
 def gen_new_filename(loc):
@@ -125,7 +127,7 @@ def gen_new_filename(loc):
     while True:
         if loc.exists() is False:
             break
-        new_fn = f'{fn}_{x}'
+        new_fn = '{}_{}'.format(fn, x)
         loc = directory / (new_fn + ext)
         x += 1
     return loc
@@ -135,9 +137,9 @@ def user_prompt1():
     while True:
         print('*' * 40)
         print('>> Select an option:')
-        print(f'\t[1] rename --> Add duplicate file with a numbered filename.')
-        print(f'\t[2] overwrite --> overwrite the existing file.')
-        print(f'\t[3] cancel --> cancel the download.')
+        print('\t[1] rename --> Add duplicate file with a numbered filename.')
+        print('\t[2] overwrite --> overwrite the existing file.')
+        print('\t[3] cancel --> cancel the download.')
         print('*' * 40)
         c = input('Your choice: ').strip()
         if c == '1' or c == 'rename':
@@ -153,9 +155,9 @@ def user_prompt2():
     while True:
         print('*' * 40)
         print('>> Select an option:')
-        print(f'\t[1] rename --> Add duplicate file with a numbered filename.')
-        print(f'\t[2] resume --> resume file download.')
-        print(f'\t[3] cancel --> cancel the download.')
+        print('\t[1] rename --> Add duplicate file with a numbered filename.')
+        print('\t[2] resume --> resume file download.')
+        print('\t[3] cancel --> cancel the download.')
         print('*' * 40)
         c = input('Your choice: ').strip()
         if c == '1' or c == 'rename':
