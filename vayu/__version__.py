@@ -1,0 +1,8 @@
+__title__ = 'vayu'
+__description__ = 'Download Manager for Humans.'
+__url__ = 'https://github.com/cquark7/vayu'
+__version__ = '0.0.1.alpha'
+__author__ = 'Deepankar Sharma'
+__author_email__ = 'dash.srmk@gmail.com'
+__license__ = 'MIT'
+__copyright__ = 'Copyright 2019 Deepankar Sharma'
