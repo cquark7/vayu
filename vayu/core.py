@@ -6,8 +6,8 @@ import warnings
 from pathlib import Path
 
 import gevent.monkey;
-
 gevent.monkey.patch_all()
+
 import requests
 
 from vayu import utils
@@ -250,11 +250,3 @@ class Downloader:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.stop(exc_type)
-
-
-if __name__ == '__main__':
-    url = "https://fr9.seedr.cc/ff_get/374372932/x64.exe?st=wCAHAm4NPL6DUPe_MhbM2w&e=1554834046"
-    dl = Downloader(url)
-    print(dl.filename)
-    dl.start()
-
